@@ -1,39 +1,23 @@
-from easyocr import Reader
 import cv2
+import numpy as np
+import matplotlib.pyplot as plt
 
-image = cv2.imread('C:/Users/abdog/Desktop/youssef_elhabashy/car_plates.jpg')
-image = cv2.resize(image, (800, 600))
+# Read the image
+image = cv2.imread('C:/Users/abdog/Desktop/test_images/person.jpg')
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-blur = cv2.GaussianBlur(gray, (5,5), 0)
-edged = cv2.Canny(blur, 10, 200)
-contours, _ = cv2.findContours(edged, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-contours = sorted(contours, key = cv2.contourArea, reverse = True)[:5]
 
-n_plate_cnt = None
-for c in contours:
-    peri = cv2.arcLength(c, True)
-    approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-    if len(approx) == 4:
-        n_plate_cnt = approx
-        break
-(x, y, w, h) = cv2.boundingRect(n_plate_cnt)
-license_plate = gray[y:y + h, x:x + w]
+# Apply median blur
+median_blur_image = cv2.medianBlur(image, 5)  # Adjust the kernel size as needed
 
-reader = Reader(['en'])
-detection = reader.readtext(license_plate)
-print(detection)
+# Display the original and median-blurred images using Matplotlib
+plt.figure(figsize=(8, 4))
 
-if len(detection) == 0:
-    text = "Impossible to read the text from the license plate"
-    cv2.putText(image, text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 3)
-    cv2.imshow('Image', image)
-    cv2.waitKey(0)
-else:
-    cv2.drawContours(image, [n_plate_cnt], -1, (0, 255, 0), 3)
-    text = f"{detection[0][1]} {detection[0][2] * 100:.2f}%"
-    cv2.putText(image, text, (x, y - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-    # display the license plate and the output image
-    print(text)
-    cv2.imshow('license plate', license_plate)
-    cv2.imshow('Image', image)
-    cv2.waitKey(0)
+plt.subplot(1, 2, 1)
+plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+plt.title('Original Image')
+
+plt.subplot(1, 2, 2)
+plt.imshow(cv2.cvtColor(median_blur_image, cv2.COLOR_BGR2RGB))
+plt.title('Median-Blurred Image')
+
+plt.show()

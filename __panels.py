@@ -227,23 +227,34 @@ class TextPanel(Panel):
     ctk.CTkEntry(
       self, 
       textvariable=self.data_var, 
+      placeholder_text='Enter Text To Add'
       ).grid(row=1, column=0, sticky='we', padx=8, pady=5)
 
 
 class DetectionPanel(Panel):
-  def __init__(self, master, text, data_var):
+  def __init__(self, master, object_detection_var, car_plate_detection_var):
     super().__init__(master=master)
     self.rowconfigure((0,1), weight=1, uniform='r')
     self.columnconfigure(0, weight=1, uniform='c')
 
-    self.data_var = data_var
+    self.object_detection_var = object_detection_var
+    self.car_plate_detection_var = car_plate_detection_var
 
     ctk.CTkButton(
     master=self, 
-    text=text,
-    command=lambda: data_var.set(True),
+    text='Object Detection',
+    command=lambda: object_detection_var.set(True),
     fg_color=MAIN_COLOR, 
     text_color=LIGHT, 
     corner_radius=5, 
-    hover_color=SECOND_COLOR).pack(pady=10)
+    hover_color=SECOND_COLOR).pack(pady=8, padx=8, fill='x')
+
+    ctk.CTkButton(
+    master=self, 
+    text='Car Plate Detection',
+    command=lambda: car_plate_detection_var.set(True),
+    fg_color=MAIN_COLOR, 
+    text_color=LIGHT, 
+    corner_radius=5, 
+    hover_color=SECOND_COLOR).pack(pady=8, padx=8, fill='x')
 

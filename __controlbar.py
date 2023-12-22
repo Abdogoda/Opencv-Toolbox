@@ -79,6 +79,7 @@ class ColorsFrame(ctk.CTkFrame):
     # panels
     DropDownPanel(self, "Convert Colors", data_vars['convert'][0], CONVERT_OPTIONS)
     SliderPanel(self, 'Brightness', data_vars['brightness'][0], -100, 100)
+    SliderPanel(self, 'Contrast', data_vars['contrast'][0], -100, 100)
     SliderPanel(self, 'Vibrance', data_vars['vibrance'][0], 0, 2)
 
 
@@ -124,4 +125,5 @@ class DetectionFrame(ctk.CTkFrame):
     ctk.CTkLabel(self, text='* DETECTION *', text_color=MAIN_COLOR, font=MEDIUM_FONT).pack(pady=10)
     
     # panels
-    DetectionPanel(self, 'Detect Objects', data_vars['object_detection'][0])
+    DropDownPanel(self, "Detection Filters", data_vars['detection_filters'][0], DETECTION_FILTERS_OPTIONS)
+    DetectionPanel(self, data_vars['object_detection'][0], data_vars['car_plate_detection'][0])

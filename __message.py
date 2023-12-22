@@ -3,7 +3,7 @@ import customtkinter as ctk
 from __settings import *
 from __functions import *
 
-class CustomSuccessMessageBox:
+class CustomMessageBox:
     def __init__(self, master, text, type):
         self.master = master
 
@@ -38,12 +38,12 @@ class CustomSuccessMessageBox:
 
 
 class TopLevelDetection:
-    def __init__(self, master, image, save_func):
+    def __init__(self, master, text, image, save_func):
         self.master = master
 
         # Create a toplevel window
         self.top = tk.Toplevel(master)
-        self.top.title("Detected Image")
+        self.top.title(text)
         self.top.overrideredirect(True)
         self.top.configure(bg=BACKGOUND_COLOR[1])
 
@@ -78,5 +78,3 @@ class TopLevelDetection:
             border_spacing=5, 
             corner_radius=0, 
             command=self.top.destroy).pack(side='left', expand=True, padx=5, pady=10)
-
-    

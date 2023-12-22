@@ -2,8 +2,12 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
-from datetime import datetime
+import sys
 import os
+from datetime import datetime
+import openpyxl
+
+# helpfull functions
 from __settings import *
 from __functions import *
 from __preloader import *
@@ -11,7 +15,30 @@ from __main__window import *
 from __sidebar import *
 from __controlbar import *
 from __message import *
+
+# detection objects
+sys.path.insert(1, 'detection/object_detection')
 from detection_function import image_detection
+
+# car plate detection 
+sys.path.insert(1, 'detection/car_plates')
+import DetectChars
+import DetectPlates
+import PossiblePlate
+
+# module level variables ##########################################################################
+SCALAR_BLACK = (0.0, 0.0, 0.0)
+SCALAR_WHITE = (255.0, 255.0, 255.0)
+SCALAR_YELLOW = (0.0, 255.0, 255.0)
+SCALAR_GREEN = (0.0, 255.0, 0.0)
+SCALAR_RED = (0.0, 0.0, 255.0)
+
+showSteps = False
+blnKNNTrainingSuccessful = DetectChars.loadKNNDataAndTrainKNN() 
+
+if blnKNNTrainingSuccessful == False: 
+    print("\nerror: KNN traning was not successful\n")
+
 
 
 class Main(ctk.CTk):
@@ -42,13 +69,12 @@ class Main(ctk.CTk):
 
     # importnant functions
     self.init_program()
-    self.show_window()
 
     # preloader
-    # def switch_to_app_frame():
-    #   self.preloader.destroy()
-    #   self.show_window()
-    # self.preloader = Preloader(master=self, callback=switch_to_app_frame)
+    def switch_to_app_frame():
+      self.preloader.destroy()
+      self.show_window()
+    self.preloader = Preloader(master=self, callback=switch_to_app_frame)
 
 
     # run the program 
@@ -152,7 +178,7 @@ class Main(ctk.CTk):
   def export_image(self, path):
     if self.image is not None:
       cv2.imwrite(path, self.image)
-      success_box = CustomSuccessMessageBox(master=self, text="Image Saved Successfully!", type="success")
+      CustomMessageBox(master=self, text="Image Saved Successfully!", type="success")
 
   # ---- Switch Is Image ----- 
   def switch_is_image(self, *args):
@@ -220,6 +246,7 @@ class Main(ctk.CTk):
       'grayscale' : [ctk.BooleanVar(value=GRAYSCALE_DEFAULT), GRAYSCALE_DEFAULT] ,
       'convert' : [ctk.StringVar(value=CONVERT_OPTIONS[0]), CONVERT_OPTIONS[0]] ,
       'vibrance' : [ctk.DoubleVar(value=VIBRANCE_DEFAULT), VIBRANCE_DEFAULT] ,
+      'contrast' : [ctk.DoubleVar(value=CONTRAST_DEFAULT), CONTRAST_DEFAULT] ,
       
       'blur' : [ctk.DoubleVar(value=BLUR_DEFAULT), BLUR_DEFAULT],
       'sharping' : [ctk.IntVar(value=SHARPING_DEFAULT), SHARPING_DEFAULT],
@@ -234,7 +261,9 @@ class Main(ctk.CTk):
       'draw' : [ctk.StringVar(value=DRAW_OPTIONS[0]), DRAW_OPTIONS[0]],
       'text' : [ctk.StringVar(value=''), ''],
 
-      'object_detection' : [ctk.BooleanVar(value=False), False]
+      'detection_filters' : [ctk.StringVar(value=DETECTION_FILTERS_OPTIONS[0]), DETECTION_FILTERS_OPTIONS[0]],
+      'object_detection' : [ctk.BooleanVar(value=False), False],
+      'car_plate_detection' : [ctk.BooleanVar(value=False), False],
     }
     self.draw_size = ctk.IntVar(value=1)
     self.draw_color = ctk.StringVar(value="#000000")
@@ -326,7 +355,8 @@ class Main(ctk.CTk):
       if convert_var == 'BGR to RGB':
         self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
       elif convert_var == 'BGR to Grayscale':
-        self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        if len(self.image.shape) == 3:
+          self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
       elif convert_var == 'RGB to BGR':
         self.image = cv2.cvtColor(self.image, cv2.COLOR_RGB2BGR)
       elif convert_var == 'BGR to HSV':
@@ -356,9 +386,20 @@ class Main(ctk.CTk):
       img_float = np.clip(img_float, 0.0, 1.0)
       self.image = (img_float * 255).astype(np.uint8)
 
+    # contrast
+    if self.data_vars['contrast'][0].get() != CONTRAST_DEFAULT:
+      flag_status = 1
+      if len(self.image.shape) == 3:
+        lab = cv2.cvtColor(self.image, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=self.data_vars['contrast'][0].get(), tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+        limg = cv2.merge((cl, a, b))
+        self.image = cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
+
     # vibrance
     if self.data_vars['vibrance'][0].get() != BRIGHTNESS_DEFAULT:
-      if self.data_vars['convert'][0].get() != 'BGR to Grayscale':
+      if len(self.image.shape) == 3:
         flag_status = 1
         img_float = self.image.astype(np.float32) / 255.0
         vibrance = self.data_vars['vibrance'][0].get()
@@ -383,35 +424,38 @@ class Main(ctk.CTk):
 
     # gray level slicing
     if self.data_vars['gray_level_slicing_min'][0].get() != GRAY_LEVEL_SLICING_MIN_DEFUALT or self.data_vars['gray_level_slicing_max'][0].get() != GRAY_LEVEL_SLICING_MAX_DEFUALT:
-      if self.data_vars['bit_plane_slicing'][0].get() == BIT_PLANE_SLICING_DEFUALT:
-        flag_status = 1
+      flag_status = 1
+      if len(self.image.shape) == 3:
         gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        mask = cv2.inRange(gray, self.data_vars['gray_level_slicing_min'][0].get(), self.data_vars['gray_level_slicing_max'][0].get())
-        self.image = cv2.bitwise_and(gray, gray, mask=mask)
+      else: 
+        gray = self.image.copy()
+      mask = cv2.inRange(gray, self.data_vars['gray_level_slicing_min'][0].get(), self.data_vars['gray_level_slicing_max'][0].get())
+      self.image = cv2.bitwise_and(gray, gray, mask=mask)
 
     # Bit plane slicing
     if self.data_vars['bit_plane_slicing'][0].get() != BIT_PLANE_SLICING_DEFUALT:
-      if self.data_vars['gray_level_slicing_min'][0].get() == GRAY_LEVEL_SLICING_MIN_DEFUALT and self.data_vars['gray_level_slicing_max'][0].get() == GRAY_LEVEL_SLICING_MAX_DEFUALT:
-        flag_status = 1
+      flag_status = 1
+      if len(self.image.shape) == 3:
         gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        bit_plane = (gray >> self.data_vars['bit_plane_slicing'][0].get()) & 1
-        self.image = bit_plane * 255
+      else: 
+        gray = self.image.copy()
+      bit_plane = (gray >> self.data_vars['bit_plane_slicing'][0].get()) & 1
+      self.image = bit_plane * 255
 
     # Salt And Papper Noise
-    if self.data_vars['s&p'][0].get() != SALT_PAPPER_DEFAULT:
-      if self.data_vars['s&p'][0].get():
-        flag_status = 1
-        # Specify probabilities for salt and pepper noise
-        salt_prob = 0.01  # adjust as needed
-        pepper_prob = 0.01  # adjust as needed
+    if self.data_vars['s&p'][0].get():
+      flag_status = 1
+      # Specify probabilities for salt and pepper noise
+      salt_prob = 0.01  # adjust as needed
+      pepper_prob = 0.01  # adjust as needed
 
-        # Add salt noise
-        salt_mask = np.random.rand(*self.image.shape[:2]) < salt_prob
-        self.image[salt_mask] = 255
+      # Add salt noise
+      salt_mask = np.random.rand(*self.image.shape[:2]) < salt_prob
+      self.image[salt_mask] = 255
 
-        # Add pepper noise
-        pepper_mask = np.random.rand(*self.image.shape[:2]) < pepper_prob
-        self.image[pepper_mask] = 0
+      # Add pepper noise
+      pepper_mask = np.random.rand(*self.image.shape[:2]) < pepper_prob
+      self.image[pepper_mask] = 0
 
     # Mdeian Blur For Salt And Papper Noise
     if self.data_vars['median_blur'][0].get() != SALT_PAPPER_DEFAULT:
@@ -427,19 +471,15 @@ class Main(ctk.CTk):
     if self.data_vars['filters'][0].get() != FILTERS_OPTIONS[0]:
       flag_status = 1
       used_filter = self.data_vars['filters'][0].get()
-      gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+      if len(self.image.shape) == 3:
+        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+      else: 
+        gray = self.image.copy()
       rows, cols = gray.shape
-      if used_filter == 'Emboss':
-        kernel_emboss = np.array([[0, -1, -1],[1,  0, -1],[1,  1,  0]])
-        self.image = cv2.filter2D(self.image, -1, kernel_emboss)
-      elif used_filter == 'Find Edges':
-        self.image = cv2.Canny(self.image, 100, 200)
-      elif used_filter == 'Threshold':
-        _, self.image = cv2.threshold(self.image, 128, 255, cv2.THRESH_BINARY)
-      elif used_filter == 'Contour':
-        _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(self.image, contours, -1, (0, 255, 0), 2)
+      if used_filter == 'Invert':
+        if len(self.image.shape) == 3:
+          self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        self.image = 255 - self.image
       elif used_filter == 'Filter2D':
         kernel = np.ones((3, 3), np.int8) / 9
         self.image = cv2.filter2D(self.image, cv2.CV_8UC1, kernel)
@@ -474,27 +514,68 @@ class Main(ctk.CTk):
       color = tuple(int(hex_color[i:i+2], 16) for i in (4, 2, 0))
       cv2.putText(self.image, self.data_vars['text'][0].get(), self.text_position, cv2.FONT_HERSHEY_SIMPLEX, self.draw_size.get(), color, 2)
 
-    # detection
+    # detection filters
+    if self.data_vars['detection_filters'][0].get() != DETECTION_FILTERS_OPTIONS[0]:
+      flag_status = 1
+      used_filter = self.data_vars['detection_filters'][0].get()
+      if len(self.image.shape) == 3:
+        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+      else: 
+        gray = self.image.copy()
+      rows, cols = gray.shape
+      if used_filter == 'Emboss':
+        kernel_emboss = np.array([[0, -1, -1],[1,  0, -1],[1,  1,  0]])
+        self.image = cv2.filter2D(self.image, -1, kernel_emboss)
+      elif used_filter == 'Find Edges (Canny)':
+        if len(self.image.shape) == 3:
+          self.image = cv2.cvtColor(self.image, cv2.COLOR_RGB2GRAY)
+        blurred = cv2.GaussianBlur(self.image, (3, 3), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        self.image = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
+      elif used_filter == 'Threshold':
+        _, self.image = cv2.threshold(self.image, 128, 255, cv2.THRESH_BINARY)
+      elif used_filter == 'Contour':
+        _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(self.image, contours, -1, (0, 255, 0), 2)
+
+    # object detection
     if self.data_vars['object_detection'][0].get() != False:
-      image_detection(self.image)
-      
-      detected_image = [f for f in os.listdir('runs/predict') if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))][0]
-      if not detected_image:  return
-      
-      self.detected_image_path = 'runs/predict/' + detected_image
-      self.pill_detected_image = Image.open(self.detected_image_path)
-      size_x = self.image_width if self.image_width < 300 else 300
-      size_y = self.image_height if self.image_height < 300 else 300
-      self.detected_image = ctk.CTkImage(self.pill_detected_image, size=(size_x, size_y))
-        
+      results = image_detection(self.original.copy())
+      if len(results) != 0:
+        detected_image = [f for f in os.listdir('detection/object_detection/runs/predict') if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))][0]
+        if not detected_image:  return
+        self.detected_image_path = 'detection/object_detection/runs/predict/' + detected_image
+        self.pill_detected_image = Image.open(self.detected_image_path)
+        size_x = self.image_width if self.image_width < 300 else 300
+        size_y = self.image_height if self.image_height < 300 else 300
+        self.detected_image = ctk.CTkImage(self.pill_detected_image, size=(size_x, size_y))
+        TopLevelDetection(master=self, text='Object Detected Image', image=self.detected_image, save_func=self.save_detected_image)
+      else:
+        CustomMessageBox(master=self, text="No Object Found To Detect!", type="warning")
       self.data_vars['object_detection'][0].set(False)
-      TopLevelDetection(master=self, image=self.detected_image, save_func=self.save_detected_image)
+
+    # car plate detection
+    if self.data_vars['car_plate_detection'][0].get() != False:
+      res = self.car_plate_detection(self.original.copy())
+      self.data_vars['car_plate_detection'][0].set(False)
+      if res['status'] == True:
+        self.add_car_plate_code_to_excel(res['message'])
+        if os.path.exists('CarPlateImage.png'):
+          self.pill_detected_image = Image.open('CarPlateImage.png')
+          size_x = self.image_width if self.image_width < 300 else 300
+          size_y = self.image_height if self.image_height < 300 else 300
+          self.detected_image = ctk.CTkImage(self.pill_detected_image, size=(size_x, size_y))
+          TopLevelDetection(master=self, text='Car Plate Detected Image', image=self.detected_image, save_func=self.save_detected_image)
+      else:
+        CustomMessageBox(master=self, text="No Car Plate Found To Detect!", type="warning")
 
     # add to changes list
     if len(args) > 0:
       for key, value in self.data_vars.items():
-        if str(args[0]) == str(value[0]):
-          self.replace_changes(key)
+        if key != 'car_plate_detection' or key != 'object_detection':
+          if str(args[0]) == str(value[0]):
+            self.replace_changes(key)
 
     # if there are no changes ==> unpick undo button
     if flag_status == 0:
@@ -517,37 +598,89 @@ class Main(ctk.CTk):
 
     return (image_row, image_col) 
 
-
-# ---- Show Detected Images ----
-  def open_save_window(self):
-    # Open a new window for saving the image
-    save_window = ctk.CTkToplevel(self.master)
-    save_window.overrideredirect(True)
-    save_window.geometry('500x500')
-    save_window.title("Detected Image")
-
-    self.label = ctk.CTkLabel(save_window, text='', image=self.detected_image)
-    self.label.pack(fill='both', expand=True)
-    save_image = ctk.CTkImage(Image.open('images/icons/download/dark.png'), size=(20, 20))
-    ctk.CTkButton(
-      save_window, 
-      text='Save',
-      border_width=1, 
-      border_color=MAIN_COLOR, 
-      fg_color='transparent', 
-      hover_color=MAIN_COLOR, 
-      border_spacing=5, 
-      corner_radius=0,
-      image=save_image,
-      compound='right',
-      command=self.save_detected_image).pack(expand=True, padx=5, pady=5)
-    ctk.CTkButton(self.top, text="OK", border_width=1, border_color=MAIN_COLOR, fg_color='transparent', hover_color=MAIN_COLOR, border_spacing=5, corner_radius=0, command=self.top.destroy).pack(side='bottom', pady=10)
-
   def save_detected_image(self):
-    file_path = filedialog.asksaveasfilename(title="Save Detected Image Image", initialfile="detection", defaultextension=self.image_extension, filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
+    file_path = filedialog.asksaveasfilename(title="Save Detected Image", initialfile="detection", defaultextension=self.image_extension, filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
     if file_path: 
       self.pill_detected_image.save(file_path)
-      success_box = CustomSuccessMessageBox(master=self, text="Detected Image Saved Successfully!", type="success")
+      CustomMessageBox(master=self, text="Detected Image Saved Successfully!", type="success")
+
+  # ---- Car Plate Detection ----
+  def car_plate_detection(self, imgOriginalScene):
+    message = "No License Were Detected"
+    if imgOriginalScene is None:
+        print("\nerror: image not read from file \n\n") 
+        return {'status': False, 'message': 'Image Not Read From File'} 
+    listOfPossiblePlates = DetectPlates.detectPlatesInScene(imgOriginalScene) 
+    listOfPossiblePlates = DetectChars.detectCharsInPlates(listOfPossiblePlates) 
+    if len(listOfPossiblePlates) == 0:
+        return {'status': False, 'message': message} 
+    else:                                     
+        listOfPossiblePlates.sort(key = lambda possiblePlate: len(possiblePlate.strChars), reverse = True)
+        licPlate = listOfPossiblePlates[0]
+        if len(licPlate.strChars) == 0:            
+            return {'status': False, 'message': message} 
+        else: 
+          message = licPlate.strChars
+        self.drawRedRectangleAroundPlate(imgOriginalScene, licPlate)  
+        self.writeLicensePlateCharsOnImage(imgOriginalScene, licPlate)  
+        cv2.imwrite("CarPlateImage.png", imgOriginalScene)
+    return {'status': True, 'message': message} 
+
+  def drawRedRectangleAroundPlate(self, imgOriginalScene, licPlate):
+    p2fRectPoints = cv2.boxPoints(licPlate.rrLocationOfPlateInScene) 
+
+  def writeLicensePlateCharsOnImage(self, imgOriginalScene, licPlate):
+      ptCenterOfTextAreaX = 0                             
+      ptCenterOfTextAreaY = 0
+      ptLowerLeftTextOriginX = 0           
+      ptLowerLeftTextOriginY = 0
+
+      sceneHeight, sceneWidth, sceneNumChannels = imgOriginalScene.shape
+      plateHeight, plateWidth, plateNumChannels = licPlate.imgPlate.shape
+
+      intFontFace = cv2.FONT_HERSHEY_SIMPLEX                      
+      fltFontScale = float(plateHeight) / 30.0                     
+      intFontThickness = int(round(fltFontScale * 1.5))            
+      textSize, baseline = cv2.getTextSize(licPlate.strChars, intFontFace, fltFontScale, intFontThickness) 
+      ( (intPlateCenterX, intPlateCenterY), (intPlateWidth, intPlateHeight), fltCorrectionAngleInDeg ) = licPlate.rrLocationOfPlateInScene
+
+      intPlateCenterX = int(intPlateCenterX) 
+      intPlateCenterY = int(intPlateCenterY)
+      ptCenterOfTextAreaX = int(intPlateCenterX)
+
+      if intPlateCenterY < (sceneHeight * 0.75):
+          ptCenterOfTextAreaY = int(round(intPlateCenterY)) + int(round(plateHeight * 1.6))
+      else:
+          ptCenterOfTextAreaY = int(round(intPlateCenterY)) - int(round(plateHeight * 1.6))
+
+      textSizeWidth, textSizeHeight = textSize 
+
+      ptLowerLeftTextOriginX = int(ptCenterOfTextAreaX - (textSizeWidth / 2))
+      ptLowerLeftTextOriginY = int(ptCenterOfTextAreaY + (textSizeHeight / 2))
+
+      cv2.putText(imgOriginalScene, licPlate.strChars, (ptLowerLeftTextOriginX, ptLowerLeftTextOriginY), intFontFace, fltFontScale, SCALAR_YELLOW, intFontThickness)
+
+  def add_car_plate_code_to_excel(self, car_plate_code):
+    excel_file_path = "car_plates.xlsx"
+    try:
+        workbook = openpyxl.load_workbook(excel_file_path)
+    except FileNotFoundError:
+        workbook = openpyxl.Workbook()
+
+    # Select or create a worksheet
+    sheet_name = "CarPlates"
+    if sheet_name not in workbook.sheetnames:
+        workbook.create_sheet(sheet_name)
+        sheet = workbook[sheet_name]
+        sheet.append(["Code", "Time"])  # Add header row if sheet is newly created
+    else:
+        sheet = workbook[sheet_name]
+
+    # Add data to the worksheet
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sheet.append([car_plate_code, current_time])
+    # Save the workbook
+    workbook.save(excel_file_path)
 
   # ---- Replace Changes ----
   def replace_changes(self, value):
